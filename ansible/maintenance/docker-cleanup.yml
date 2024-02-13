@@ -1,0 +1,27 @@
+---
+- name: clean docker
+  hosts: all
+  gather_facts: yes
+  tasks:
+    #- name: Ensure python docker sdk is installed
+    #  command: python3 -m pip install docker
+    #  changed_when: false
+    - name: Check if python docker sdk package is installed
+      command: "pip3 show docker"
+      register: pip_show_output
+      ignore_errors: true
+      changed_when: false
+    - name: Install python docker sdk if required
+      pip:
+        name: docker
+        state: present
+      when: pip_show_output.rc != 0  # Install only if the package is not already installed
+    - name: prune non-dangling images
+      community.docker.docker_prune:
+        containers: false
+        images: true
+        images_filters:
+          dangling: false
+        networks: false
+        volumes: false
+        builder_cache: false

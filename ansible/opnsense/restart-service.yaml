@@ -1,0 +1,24 @@
+- hosts: 127.0.0.1,localhost
+  gather_facts: yes
+  module_defaults:
+    group/ansibleguy.opnsense.all:
+      firewall: '{{ opensense_host }}'
+      api_port: '{{ opensense_port }}'
+      api_credential_file: '{{ opensense_api_cred }}'
+
+  tasks:
+    - name: Update Packages (apk update)
+      command: apk update
+      become: true
+    - name: Install py-pip (apk add py-pip)
+      command: apk add py-pip
+      become: true
+    - name: Install httpx (python3 -m pip install httpx)
+      command: python3 -m pip install httpx
+      become: true
+    #- name: Install Ansible Galaxy Roles
+    #  local_action: ansible.builtin.command ansible-galaxy install -r collections/requirements.yml --force
+    - name: Restarting openvpn service
+      ansibleguy.opnsense.service:
+        name: 'openvpn'
+        action: 'restart'

@@ -1,0 +1,129 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+
+    - name: Set Python interpreter for Ansible
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: /usr/local/bin/python3.9
+      delegate_to: localhost
+
+    - name: Update APK repositories
+      ansible.builtin.apk:
+        update_cache: yes
+      changed_when: false
+      become: true
+      delegate_to: localhost
+
+    - name: Install python pip and all needed python libraries required
+      ansible.builtin.command: "{{ item }}"
+      with_items:
+        - apk add py-pip
+        - python3 -m pip install jmespath
+        - python3 -m pip install paho-mqtt
+      become: true
+      changed_when: false
+      delegate_to: localhost
+
+    - name: Run curl command before stopping OpenVPN
+      ansible.builtin.command: "curl --interface ovpnc{{ vpn_id }} http://ip-api.com/json"
+      register: curl_output_before
+      timeout: 5
+      changed_when: false
+      ignore_errors: True
+
+    - name: Extract IP, Country, and ISP before stopping OpenVPN
+      ansible.builtin.set_fact:
+        ip_before: "{{ curl_output_before.stdout | from_json | json_query('query') }}"
+        country_before: "{{ curl_output_before.stdout | from_json | json_query('country') }}"
+        city_before: "{{ curl_output_before.stdout | from_json | json_query('city') }}"
+        isp_before: "{{ curl_output_before.stdout | from_json | json_query('isp') }}"
+      ignore_errors: True
+
+    - name: Start and Stop OpenVPN to randomly change IP
+      ansible.builtin.command: "{{ item }}"
+      with_items:
+        - pluginctl -s openvpn stop {{ vpn_id }}
+        - sleep 3
+        - pluginctl -s openvpn start {{ vpn_id }}
+      ignore_errors: True
+ 
+    - name: Pause 5 seconds to wait for openvpn to establish a new tunnel 
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Run curl command after starting OpenVPN
+      ansible.builtin.command: "curl --interface ovpnc{{ vpn_id }} http://ip-api.com/json"
+      register: curl_output_after
+      timeout: 5
+      changed_when: false
+      ignore_errors: True
+
+    - name: Send MQTT Message when openvpn fails to connect
+      mqtt:
+        username: "{{ mqtt_username }}"
+        password: "{{ mqtt_password }}"
+        server: "{{ mqtt_server }}"
+        port: "{{ mqtt_port }}"
+        topic: "{{ mqtt_topic }}"
+        payload: "OpenVPN {{ ifconfig_if_name }}, the IP change task failed the vpn is currently down, run the task again please."
+        qos: 0
+        retain: False
+        client_id: ansible
+      delegate_to: localhost
+      when: "'Failed' in curl_output_after.stderr"
+      ignore_errors: True
+    
+    - name: Failing task early
+      ansible.builtin.set_fact:
+        fail_state: True
+      when: "'Failed' in curl_output_after.stderr"
+      failed_when: "'Failed' in curl_output_after.stderr" 
+
+    - name: Extract IP, Country, and ISP after starting OpenVPN
+      ansible.builtin.set_fact:
+        ip_after: "{{ curl_output_after.stdout | from_json | json_query('query') }}"
+        country_after: "{{ curl_output_after.stdout | from_json | json_query('country') }}"
+        city_after: "{{ curl_output_after.stdout | from_json | json_query('city') }}"
+        isp_after: "{{ curl_output_after.stdout | from_json | json_query('isp') }}"
+      ignore_errors: True
+
+    - name: Display Previous and Current IP info
+      ansible.builtin.debug:
+        msg: "OpenVPN {{ ifconfig_if_name }} IP change. Previous IP: {{ ip_before }} --> Current IP: {{ ip_after }} - Detected Info... Country: {{ country_after }} - City: {{ city_after }} - ISP: {{ isp_after }}"
+      ignore_errors: True
+
+    - name: Send MQTT Message when the tunnel was down but was successfully brought up
+      mqtt:
+        username: "{{ mqtt_username }}"
+        password: "{{ mqtt_password }}"
+        server: "{{ mqtt_server }}"
+        port: "{{ mqtt_port }}"
+        topic: "{{ mqtt_topic }}"
+        payload: "OpenVPN {{ ifconfig_if_name }} IP change. This openvpn tunnel was down, new Tunnel started. Current IP: {{ ip_after }} - Detected Info... Country: {{ country_after }} - City: {{ city_after }} - ISP: {{ isp_after }}"
+        qos: 0
+        retain: False
+        client_id: ansible
+      delegate_to: localhost
+      when: "'Failed' in curl_output_before.stderr"
+      ignore_errors: True
+
+    - name: Display Previous New IP Info if Tunnel was down
+      ansible.builtin.debug:
+        msg: "OpenVPN {{ ifconfig_if_name }} IP change. This openvpn tunnel was down, new Tunnel started. Current IP: {{ ip_after }} - Detected Info... Country: {{ country_after }} - City: {{ city_after }} - ISP: {{ isp_after }}"
+      when: "'Failed' in curl_output_before.stderr"
+      ignore_errors: True
+
+    - name: Send MQTT Message when IP Change was successful and the tunnel was connected when the task started
+      mqtt:
+        username: "{{ mqtt_username }}"
+        password: "{{ mqtt_password }}"
+        server: "{{ mqtt_server }}"
+        port: "{{ mqtt_port }}"
+        topic: "{{ mqtt_topic }}"
+        payload: "OpenVPN {{ ifconfig_if_name }} IP change. Previous IP: {{ ip_before }} --> Current IP: {{ ip_after }} - Detected Info... Country: {{ country_after }} - City: {{ city_after }} - ISP: {{ isp_after }}"
+        retain: False
+        client_id: ansible
+      delegate_to: localhost
+      when: "'Failed' not in curl_output_before.stderr"
+      
