@@ -1,6 +1,6 @@
 ---
 - name: clean docker
-  hosts: all
+  hosts: "{{ host_list }}"
   gather_facts: yes
   tasks:
     #- name: Ensure python docker sdk is installed

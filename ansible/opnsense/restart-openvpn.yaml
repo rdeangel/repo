@@ -5,7 +5,7 @@
 
     - name: Set Python interpreter for Ansible
       ansible.builtin.set_fact:
-        ansible_python_interpreter: /usr/local/bin/python3.9
+        ansible_python_interpreter: /usr/local/bin/python3
       delegate_to: localhost
 
     - name: Update APK repositories
